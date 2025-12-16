@@ -90,7 +90,7 @@ class TeachingEvaluationBot:
             print(f"评估会话 {session_num} 登录过程中出错: {e}")
             return False
 
-        def navigate_to_evaluation_main(self):
+    def navigate_to_evaluation_main(self):
         """主会话导航到教学评估页面"""
         try:
             # 点击刷新按钮
@@ -547,4 +547,5 @@ if __name__ == "__main__":
     else:
         bot = TeachingEvaluationBot()
         bot.run(STUDENT_ID, PASSWORD)
+
 
