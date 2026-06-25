@@ -8,26 +8,92 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
+
+class AntiDetectionBrowser:
+    def get_mobile_options(self):
+        """获取移动端浏览器选项"""
+        mobile_emulation = {
+            "deviceMetrics": {"width": 360, "height": 640, "pixelRatio": 3.0},
+            "userAgent": "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
+        }
+
+        options = Options()
+        options.add_experimental_option("mobileEmulation", mobile_emulation)
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+
+        # 添加更多反检测参数
+        options.add_argument('--disable-webgl')
+        options.add_argument('--disable-3d-apis')
+        options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+
+        return options
+
+    def get_desktop_options_with_proxy(self):
+        """获取带代理的桌面浏览器选项"""
+        options = Options()
+
+        # 随机选择一个User-Agent
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ]
+
+        import random
+        options.add_argument(f'--user-agent={random.choice(user_agents)}')
+
+        # 添加其他反检测参数
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+
+        return options
+
+
 class TeachingEvaluationBot:
     def __init__(self):
-        # 设置Chrome选项
+        # 初始化课程字典
+        self.course_dict = {}
+        self.completed_evaluations = 0
+        self.lock = threading.Lock()
+        self.thread_pool = ThreadPoolExecutor(max_workers=10)
+
+        # 设置 Chrome 选项 - 一次性完成所有配置
         self.chrome_options = Options()
-        # 忽略SSL证书错误
+
+        # 基础设置
         self.chrome_options.add_argument('--ignore-certificate-errors')
         self.chrome_options.add_argument('--ignore-ssl-errors')
-        # 可选：无头模式，如果需要可视化可以注释掉
-        # self.chrome_options.add_argument('--headless')
+        self.chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        self.chrome_options.add_argument('--no-sandbox')
+        self.chrome_options.add_argument('--disable-dev-shm-usage')
+        self.chrome_options.add_argument('--disable-gpu')
+        self.chrome_options.add_argument('--disable-web-security')
+        self.chrome_options.add_argument('--allow-running-insecure-content')
 
+        # 禁用自动化特征
+        self.chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        self.chrome_options.add_experimental_option('useAutomationExtension', False)
+
+        # 添加自定义User-Agent（模拟移动端）
+        self.chrome_options.add_argument(
+            '--user-agent=Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36'
+        )
+
+        # 创建主驱动（只创建一次）
         self.main_driver = webdriver.Chrome(options=self.chrome_options)
         self.wait = WebDriverWait(self.main_driver, 10)
-        self.course_dict = {}
-        self.student_id = ""
-        self.password = ""
 
-        # 并行执行相关变量
-        self.thread_pool = ThreadPoolExecutor(max_workers=10)  # 增加并发数
-        self.completed_evaluations = 0  # 完成的评估数量
-        self.lock = threading.Lock()  # 线程锁
+        # 执行CDP命令移除webdriver痕迹
+        self.main_driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': '''
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            '''
+        })
 
     def login_main(self):
         """主会话登录系统"""
@@ -38,7 +104,10 @@ class TeachingEvaluationBot:
             username_input = self.wait.until(
                 EC.presence_of_element_located((By.ID, "username"))
             )
-            password_input = self.main_driver.find_element(By.ID, "passwordOld")
+            # 注意：密码框ID改为 passwordOld
+            password_input = self.wait.until(
+                EC.presence_of_element_located((By.ID, "passwordOld"))
+            )
 
             # 输入用户名和密码
             username_input.clear()
@@ -47,13 +116,13 @@ class TeachingEvaluationBot:
             password_input.send_keys(self.password)
             print("已输入用户名和密码")
 
-            # 点击登录按钮
-            login_btn = self.main_driver.find_element(By.ID, "J-login-btn")
-            login_btn.click()
-            print("已点击登录按钮")
+            # 使用JavaScript触发登录（因为登录按钮调用_systemLogin()函数）
+            login_script = "_systemLogin();"
+            self.main_driver.execute_script(login_script)
+            print("已触发登录")
 
             # 等待登录完成
-            time.sleep(3)
+            time.sleep(5)  # 增加等待时间
             return True
         except Exception as e:
             print(f"登录过程中出错: {e}")
@@ -93,7 +162,8 @@ class TeachingEvaluationBot:
     def navigate_to_evaluation_main(self):
         """主会话导航到教学评估页面"""
         try:
-            # 点击刷新按钮
+            # --- 新增步骤：点击刷新按钮 ---
+            # 使用相对路径的XPath，更稳定
             refresh_button_xpath = "//*[@id='page-content-template']/div[1]/div[2]/div/div[1]/div/a"
             refresh_button = self.wait.until(
                 EC.element_to_be_clickable((By.XPATH, refresh_button_xpath))
@@ -101,6 +171,8 @@ class TeachingEvaluationBot:
             refresh_button.click()
             print("已点击刷新按钮")
             time.sleep(3)
+
+            # --- 新增步骤结束 ---
 
             # 点击教学评估菜单
             evaluation_menu = self.wait.until(
@@ -112,32 +184,73 @@ class TeachingEvaluationBot:
 
             # 等待页面跳转和刷新完成
             time.sleep(3)
+
+            # --- 新增：处理可能出现的弹窗 ---
+            self.handle_notice_modal(self.main_driver)
+
             return True
         except Exception as e:
             print(f"导航到评估页面时出错: {e}")
             return False
 
     def navigate_to_evaluation_session(self, driver, session_num):
-        """评估会话导航到教学评估页面"""
         try:
-            # 点击教学评估菜单
             wait = WebDriverWait(driver, 10)
+
+            # ---- 新增：点击刷新按钮 ----
+            refresh_button_xpath = "//*[@id='page-content-template']/div[1]/div[2]/div/div[1]/div/a"
+            refresh_button = wait.until(
+                EC.element_to_be_clickable((By.XPATH, refresh_button_xpath))
+            )
+            refresh_button.click()
+            print(f"评估会话 {session_num}: 已点击刷新按钮")
+            time.sleep(3)
+
+            # ---- 点击教学评估菜单 ----
             evaluation_menu = wait.until(
                 EC.element_to_be_clickable(
-                    (By.XPATH, "//li[contains(@class, 'click-item') and contains(text(), '教学评估')]"))
+                    (By.XPATH, "//li[contains(@class, 'click-item') and contains(text(), '教学评估')]")
+                )
             )
             evaluation_menu.click()
             print(f"评估会话 {session_num}: 已点击教学评估菜单")
 
-            # 等待页面跳转
             time.sleep(3)
+
+            # ---- 处理弹窗 ----
+            self.handle_notice_modal(driver)
+
             return True
         except Exception as e:
             print(f"评估会话 {session_num} 导航到评估页面时出错: {e}")
             return False
 
+    def handle_notice_modal(self, driver):
+        """处理评教须知弹窗，如果存在则直接移除"""
+        try:
+            # 等待弹窗出现（最多5秒）
+            wait = WebDriverWait(driver, 5)
+            modal = wait.until(EC.presence_of_element_located((By.ID, "tsxx_model")))
+            # 使用 JavaScript 移除弹窗
+            driver.execute_script("arguments[0].remove();", modal)
+            # 同时移除背景遮罩（如果有）
+            try:
+                backdrop = driver.find_element(By.CLASS_NAME, "modal-backdrop")
+                driver.execute_script("arguments[0].remove();", backdrop)
+            except NoSuchElementException:
+                pass
+            print("已移除评教须知弹窗")
+            time.sleep(0.5)  # 给页面一点时间调整
+        except TimeoutException:
+            # 没有弹窗，正常继续
+            pass
+        except Exception as e:
+            print(f"处理弹窗时出错（可忽略）: {e}")
+
     def parse_course_table(self):
         """解析课程表格并创建课程字典"""
+        if not hasattr(self, 'course_dict'):
+            self.course_dict = {}
         try:
             # 等待表格加载
             table = self.wait.until(
@@ -155,24 +268,26 @@ class TeachingEvaluationBot:
             for i, row in enumerate(course_rows, 1):
                 try:
                     # 获取课程信息
-                    course_name = row.find_element(By.XPATH, "./td[4]").text  # 评估内容列
-                    teacher_name = row.find_element(By.XPATH, "./td[3]").text  # 被评人列
-                    status = row.find_element(By.XPATH, "./td[5]").text.strip()  # 是否已评估列
+                    course_name = row.find_element(By.XPATH, "./td[4]").text
+                    teacher_name = row.find_element(By.XPATH, "./td[3]").text
+                    questionnaire = row.find_element(By.XPATH, "./td[2]").text.strip()
+                    status = row.find_element(By.XPATH, "./td[5]").text.strip()
 
                     # 获取评估按钮
                     eval_button = row.find_element(By.XPATH, "./td[1]/button")
 
                     # 添加到课程字典
-                    course_key = f"{course_name}_{teacher_name}"
+                    course_key = f"{questionnaire}_{course_name}_{teacher_name}"
                     self.course_dict[course_key] = {
                         'index': i,
+                        'questionnaire': questionnaire,  # 可保留备用
                         'course_name': course_name,
                         'teacher': teacher_name,
                         'status': status,
                         'button': eval_button,
                         'evaluated': False,
-                        'evaluation_completed': False,  # 标记评估是否已完成
-                        'submitted': False  # 标记是否已提交
+                        'evaluation_completed': False,
+                        'submitted': False
                     }
 
                     print(f"{i:<4} {course_name:<20} {teacher_name:<10} {course_name:<20} {status:<8}")
@@ -285,12 +400,24 @@ class TeachingEvaluationBot:
     def wait_with_progress_independent(self, session_num, wait_time):
         """独立会话的带进度显示的等待"""
         start_time = time.time()
+        last_printed = None  # 记录上次打印的剩余时间（整秒）
         while time.time() - start_time < wait_time:
             elapsed = time.time() - start_time
             remaining = wait_time - elapsed
-            if remaining % 30 == 0 or remaining <= 10:
-                print(f"评估会话 {session_num}: 剩余等待时间: {int(remaining)} 秒")
+            remaining_int = int(remaining)
+
+            # 在整30秒时打印
+            if remaining_int % 30 == 0 and remaining_int != last_printed:
+                print(f"评估会话 {session_num}: 剩余等待时间: {remaining_int} 秒")
+                last_printed = remaining_int
+
+            # 仅在剩余10秒时打印一次
+            if remaining_int == 10 and remaining_int != last_printed:
+                print(f"评估会话 {session_num}: 剩余 10 秒，即将提交...")
+                last_printed = remaining_int
+
             time.sleep(1)
+
         print(f"评估会话 {session_num}: 等待完成，准备提交")
 
     def evaluate_all_courses_independent_timing(self):
@@ -299,7 +426,7 @@ class TeachingEvaluationBot:
 
         # 获取需要评估的课程列表
         courses_to_evaluate = [course for course in self.course_dict.values()
-                               if course['status'] == '否' and not course['evaluated']]
+                               if course['status'] != '是' and not course['evaluated']]
         print(f"需要评估的课程数量: {len(courses_to_evaluate)}")
 
         if not courses_to_evaluate:
@@ -547,5 +674,4 @@ if __name__ == "__main__":
     else:
         bot = TeachingEvaluationBot()
         bot.run(STUDENT_ID, PASSWORD)
-
 
