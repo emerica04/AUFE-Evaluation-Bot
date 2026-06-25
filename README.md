@@ -24,8 +24,8 @@
 # 安装步骤
 
 1. 为 Python 安装 Selenium 包：在 cmd 中使用 `pip install selenium`
-2. 下载 ChromeDriver：访问[友情链接](https://googlechromelabs.github.io/chrome-for-testing/)，下载与你的 Chrome 浏览器版本完全匹配的 ChromeDriver 。
-3. 将下载好的 ChromeDriver 解压后将 chromedriver.exe 放到 python.exe 同一目录下
+2. 下载 ChromeDriver：访问[友情链接](https://googlechromelabs.github.io/chrome-for-testing/)，下载与你的 Chrome 浏览器版本号**完全匹配**的 ChromeDriver 。
+3. 将下载好的 ChromeDriver 解压后将 chromedriver.exe 等文件移动到 python.exe 同一目录下
 4. 下载 `教评脚本2.py`
 
 # 使用方法
@@ -46,6 +46,8 @@
 # 使用案例
 
 室友有19门课，用时5分半就全部搞定
+
+![Win+Tab状态下程序运行示意图](图片.png)
 
 # 免责声明
 本脚本仅供学习和研究使用，请遵守学校相关规定，合理使用自动化工具。使用者需对使用本脚本产生的一切后果负责。
